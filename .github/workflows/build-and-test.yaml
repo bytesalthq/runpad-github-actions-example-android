@@ -1,0 +1,59 @@
+name: Build & Test on Runpad
+
+on:
+  push:
+    branches: ['main']
+
+jobs:
+  build:
+    name: Build & Test on Runpad
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Java
+        uses: actions/setup-java@v3
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+      - name: Assemble APK
+        run: ./gradlew assembleRelease
+      - name: Set app path environment variable
+        run: echo "APP_DIR_PATH=$PWD/app/build/outputs/apk/release/app-release-unsigned.apk" >> $GITHUB_ENV
+      - name: Setup Android tool paths
+        run: |
+          echo "PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH" >> $GITHUB_ENV
+      - name: Install emulator
+        run: |
+          sdkmanager "system-images;android-33;google_apis_playstore;x86_64"
+          avdmanager create avd -n pixel-android-33 --device pixel -k "system-images;android-33;google_apis_playstore;x86_64"
+
+      # Skip this step if running directly on physical machine.
+      # Required only when running on Android emulator on VM for hardware acceleration.
+      - name: Enable KVM group perms
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Runpad - Install Runpad CLI
+        run: |
+          curl -fsSL https://downloads.bytesalt.com/runpad-cli-install.sh | bash
+      - name: Runpad - Run tests
+        # Store your Runpad client ID and secret as secrets in your Github repository
+        # Guide: https://docs.github.com/en/actions/security-guides/using-secrets-in-github-actions#creating-secrets-for-a-repository
+        env:
+          RUNPAD_CLIENT_ID: ${{ secrets.RUNPAD_CLIENT_ID }}
+          RUNPAD_CLIENT_SECRET: ${{ secrets.RUNPAD_CLIENT_SECRET }}
+        # Replace the project-id value with your Runpad project ID
+        run: |
+          runpad run                                              \
+          --project-id=11ef182a-b845-f420-9741-6973dfd76499       \
+          --platform=android                                      \
+          --device='pixel-android-33'                             \
+          --build-path=${{ env.APP_DIR_PATH }}
